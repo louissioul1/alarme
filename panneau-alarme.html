@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Panneau Alarme - MQTT</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.3.4/mqtt.min.js"></script>
+<style>
+  :root{
+    --vert:#1db954; --rouge:#e74c3c; --bleu:#3498db; --orange:#f39c12; --gris:#5a6472; --fond:#101418;
+    --carte:#1a1f26; --texte:#eef2f5; --sousTexte:#8a96a3;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:var(--fond); color:var(--texte);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    padding:20px;
+  }
+  .carte{
+    background:var(--carte); border-radius:20px; padding:28px 24px;
+    width:100%; max-width:380px; box-shadow:0 10px 30px rgba(0,0,0,0.4);
+    text-align:center;
+  }
+  h1{font-size:1.3rem; margin:0 0 4px; letter-spacing:0.5px;}
+  .sousTitre{color:var(--sousTexte); font-size:0.85rem; margin-bottom:10px;}
+  .connexionInfo{
+    font-size:0.72rem; padding:6px 10px; border-radius:20px; display:inline-block;
+    margin-bottom:20px; transition:background 0.3s ease, color 0.3s ease;
+  }
+  .connexionInfo.connecte{ background:rgba(29,185,84,0.15); color:var(--vert); }
+  .connexionInfo.deconnecte{ background:rgba(231,76,60,0.15); color:var(--rouge); }
+  .statutBox{
+    border-radius:16px; padding:22px 10px; margin-bottom:16px;
+    transition:background 0.3s ease;
+  }
+  .statutBox.desarmee{ background:rgba(29,185,84,0.12); border:2px solid var(--vert); }
+  .statutBox.armee{ background:rgba(52,152,219,0.15); border:2px solid var(--bleu); }
+  .statutBox.prealerte{ background:rgba(243,156,18,0.18); border:2px solid var(--orange); animation:clignote 0.6s infinite; }
+  .statutBox.declenchee{ background:rgba(231,76,60,0.18); border:2px solid var(--rouge); animation:clignote 1s infinite; }
+  .statutBox.inconnu{ background:rgba(90,100,114,0.12); border:2px solid var(--gris); }
+  @keyframes clignote{ 50%{ opacity:0.55; } }
+  .statutLabel{ font-size:0.8rem; color:var(--sousTexte); text-transform:uppercase; letter-spacing:1px;}
+  .statutValeur{ font-size:1.7rem; font-weight:700; margin-top:6px; }
+  .statutValeur.desarmee{ color:var(--vert); }
+  .statutValeur.armee{ color:var(--bleu); }
+  .statutValeur.prealerte{ color:var(--orange); }
+  .statutValeur.declenchee{ color:var(--rouge); }
+  .statutValeur.inconnu{ color:var(--gris); }
+  .presenceInfo{ font-size:0.78rem; color:var(--sousTexte); margin-bottom:20px; }
+  .boutons{ display:flex; flex-direction:column; gap:12px; }
+  button{
+    border:none; border-radius:14px; padding:16px; font-size:1rem; font-weight:600;
+    cursor:pointer; transition:transform 0.08s ease, opacity 0.2s ease; color:#fff;
+  }
+  button:active{ transform:scale(0.97); }
+  button:disabled{ opacity:0.4; cursor:not-allowed; }
+  .btnArmer{ background:var(--bleu); }
+  .btnDesarmer{ background:var(--vert); }
+  .btnTest{ background:var(--orange); }
+  .msg{ margin-top:16px; font-size:0.75rem; color:var(--sousTexte); min-height:16px; word-break:break-word; }
+</style>
+</head>
+<body>
+  <div class="carte">
+    <h1>Panneau d'Alarme</h1>
+    <div class="sousTitre">Connexion directe MQTT (HiveMQ Cloud)</div>
+    <div class="connexionInfo deconnecte" id="connexionInfo">Connexion en cours...</div>
+
+    <div class="statutBox inconnu" id="statutBox">
+      <div class="statutLabel">Etat actuel</div>
+      <div class="statutValeur inconnu" id="statutValeur">...</div>
+    </div>
+
+    <div class="presenceInfo" id="presenceInfo">En attente de donnees...</div>
+
+    <div class="boutons">
+      <button class="btnArmer" id="btnArmer" disabled>ARMER (ON)</button>
+      <button class="btnDesarmer" id="btnDesarmer" disabled>DESARMER (OFF)</button>
+      <button class="btnTest" id="btnTest" disabled>TEST SIRENE (3 sec)</button>
+    </div>
+
+    <div class="msg" id="msg"></div>
+  </div>
+
+<script>
+  // ==========================================================================
+  // CONFIGURATION MQTT - identifiants HiveMQ Cloud (cluster "elixir dore")
+  // ==========================================================================
+  // Port 8884 (WebSocket Secure) - different du port 8883 utilise par l'ESP32
+  // (l'ESP32 se connecte en TCP direct, un navigateur doit passer par WSS)
+  const MQTT_HOST = "24b96369f04a469ebf4334d43d5020cf.s1.eu.hivemq.cloud";
+  const MQTT_PORT = 8884;
+  const MQTT_USER = "panneau-alarme";
+  const MQTT_PASS = "BFUAF%5H3v#oDa#3PEGL";
+
+  const TOPIC_ETAT     = "alarme/etat";
+  const TOPIC_COMMANDE = "alarme/commande";
+
+  // ATTENTION SECURITE : ce fichier HTML contient vos identifiants MQTT en
+  // clair (visibles par quiconque ouvre le fichier ou son code source). Ne le
+  // publiez jamais sur un site web public. Utilisez-le uniquement en local
+  // (fichier ouvert directement dans le navigateur) ou sur une page protegee.
+  // ==========================================================================
+
+  const connexionInfo = document.getElementById('connexionInfo');
+  const statutBox     = document.getElementById('statutBox');
+  const statutValeur  = document.getElementById('statutValeur');
+  const presenceInfo  = document.getElementById('presenceInfo');
+  const msg           = document.getElementById('msg');
+  const btnArmer      = document.getElementById('btnArmer');
+  const btnDesarmer   = document.getElementById('btnDesarmer');
+  const btnTest       = document.getElementById('btnTest');
+
+  const idClient = "panneau-web-" + Math.random().toString(16).slice(2, 10);
+  const url = `wss://${MQTT_HOST}:${MQTT_PORT}/mqtt`;
+
+  const client = mqtt.connect(url, {
+    clientId: idClient,
+    username: MQTT_USER,
+    password: MQTT_PASS,
+    reconnectPeriod: 3000,
+  });
+
+  client.on('connect', () => {
+    connexionInfo.textContent = "Connecte";
+    connexionInfo.className = "connexionInfo connecte";
+    client.subscribe(TOPIC_ETAT);
+    [btnArmer, btnDesarmer, btnTest].forEach(b => b.disabled = false);
+    msg.textContent = "Connexion MQTT etablie.";
+  });
+
+  client.on('reconnect', () => {
+    connexionInfo.textContent = "Reconnexion...";
+    connexionInfo.className = "connexionInfo deconnecte";
+  });
+
+  client.on('close', () => {
+    connexionInfo.textContent = "Deconnecte";
+    connexionInfo.className = "connexionInfo deconnecte";
+    [btnArmer, btnDesarmer, btnTest].forEach(b => b.disabled = true);
+  });
+
+  client.on('error', (err) => {
+    msg.textContent = "Erreur MQTT : " + err.message;
+  });
+
+  client.on('message', (topic, payload) => {
+    if (topic !== TOPIC_ETAT) return;
+    try {
+      const data = JSON.parse(payload.toString());
+      majAffichage(data);
+    } catch (e) {
+      msg.textContent = "Message recu invalide.";
+    }
+  });
+
+  function majAffichage(data) {
+    const etat = data.etat || "inconnu";
+    statutBox.className = "statutBox " + etat;
+    statutValeur.className = "statutValeur " + etat;
+
+    if (etat === "desarmee")   statutValeur.textContent = "DESARMEE / OFF";
+    if (etat === "armee")      statutValeur.textContent = "ARMEE (surveillance)";
+    if (etat === "prealerte")  statutValeur.textContent = "DETECTION ! Desarmez maintenant";
+    if (etat === "declenchee") statutValeur.textContent = "DECLENCHEE !";
+
+    presenceInfo.textContent = data.presence
+      ? "Presence detectee a la maison"
+      : "Personne detecte a la maison";
+
+    btnTest.disabled = data.testEnCours || etat === "declenchee" || etat === "prealerte";
+  }
+
+  function envoyerCommande(commande) {
+    if (!client.connected) {
+      msg.textContent = "Non connecte au serveur MQTT.";
+      return;
+    }
+    client.publish(TOPIC_COMMANDE, commande);
+    msg.textContent = "Commande envoyee : " + commande + " (" + new Date().toLocaleTimeString() + ")";
+  }
+
+  btnArmer.addEventListener('click', () => envoyerCommande('ARMER'));
+  btnDesarmer.addEventListener('click', () => envoyerCommande('DESARMER'));
+  btnTest.addEventListener('click', () => envoyerCommande('TEST'));
+</script>
+</body>
+</html>
