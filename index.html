@@ -91,17 +91,16 @@
   // (l'ESP32 se connecte en TCP direct, un navigateur doit passer par WSS)
   const MQTT_HOST = "24b96369f04a469ebf4334d43d5020cf.s1.eu.hivemq.cloud";
   const MQTT_PORT = 8884;
-  const MQTT_USER = "panneau-alarme";
-  const MQTT_PASS = "BFUAF%5H3v#oDa#3PEGL";
-
+  const MQTT_USER = "panneau-alarme-web";
+  const MQTT_PASS = "N3jpjO6E5f3mWY4gC2pIvhBB";
   const TOPIC_ETAT     = "alarme/etat";
   const TOPIC_COMMANDE = "alarme/commande";
 
-  // ATTENTION SECURITE : ce fichier HTML contient vos identifiants MQTT en
-  // clair (visibles par quiconque ouvre le fichier ou son code source). Ne le
-  // publiez jamais sur un site web public. Utilisez-le uniquement en local
-  // (fichier ouvert directement dans le navigateur) ou sur une page protegee.
-  // ==========================================================================
+  // SECURITE : ce fichier est publie publiquement (GitHub Pages).
+// Identifiants MQTT dedies (compte "panneau-alarme-web", permissions
+// limitees a ce panneau). Si vous devez faire tourner ce mot de passe,
+// faites-le dans la console HiveMQ Cloud puis mettez ce fichier a jour.
+// ================================================================
 
   const connexionInfo = document.getElementById('connexionInfo');
   const statutBox     = document.getElementById('statutBox');
